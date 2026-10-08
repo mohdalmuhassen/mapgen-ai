@@ -418,7 +418,23 @@ function selectCountry(id,{focus:shouldFocus=false}={}){
  window.dispatchEvent(new CustomEvent('country-selected',{detail}));
  return true;
 }
-window.headOfStateMap=Object.freeze({selectCountry,reset,zoomAt,get selectedCountryId(){return selected;},diagnostics});
+/* A deliberate tap on the open sea clears the country highlight without changing zoom or pan. */
+function clearSelection(){
+ if(selected===null)return false;
+ selected=null;
+ for(const el of playable)el.classList.remove('is-selected');
+ outline.setAttribute('d','');
+ outline.style.display='none';
+ $('countryName').textContent='اختر دولة من الخريطة';
+ $('countryDesc').textContent='اضغط على أي دولة ملوّنة، أو ابحث عنها بالاسم. حرّك الخريطة واسحبها للتنقل.';
+ $('selectedIso').textContent='—';
+ $('selectedId').textContent='—';
+ tip.style.display='none';
+ renderDiagnostics();
+ window.dispatchEvent(new CustomEvent('country-selection-cleared',{detail:{gameCountryId:null}}));
+ return true;
+}
+window.headOfStateMap=Object.freeze({selectCountry,clearSelection,reset,zoomAt,get selectedCountryId(){return selected;},diagnostics});
 renderDiagnostics();
 $('zoomIn').addEventListener('click',()=>zoomAt(k*1.6));
 $('zoomOut').addEventListener('click',()=>zoomAt(k/1.6));
@@ -428,9 +444,11 @@ $('goUAE').addEventListener('click',()=>selectCountry('united-arab-emirates',{fo
 /* Mouse drag via pointer events. Touch is handled separately to prevent iOS page zoom/navigation gestures. */
 let mouse=null;
 function getHit(target){const t=target?.closest?.('[data-country-id]');return t?.dataset.countryId||null;}
+/* Land without a game ID is not sea, so clicking an unplayable country won't clear selection. */
+function isSeaTarget(target){return !!target&&!target.closest?.('.land, [data-country-id]');}
 svg.addEventListener('pointerdown',e=>{
  if(e.pointerType==='touch'||e.button!==0)return;
- const p=pos(e);mouse={id:e.pointerId,last:p,start:p,hit:getHit(e.target),moved:false};
+ const p=pos(e);mouse={id:e.pointerId,last:p,start:p,hit:getHit(e.target),sea:isSeaTarget(e.target),moved:false};
  try{svg.setPointerCapture(e.pointerId);}catch(_){}
  svg.classList.add('dragging');tip.style.display='none';
 });
@@ -452,7 +470,10 @@ svg.addEventListener('pointermove',e=>{
 function mouseRelease(e){
  if(!mouse||e.pointerId!==mouse.id)return;
  const m=mouse;mouse=null;svg.classList.remove('dragging');
- if(!m.moved&&Math.hypot(pos(e).x-m.start.x,pos(e).y-m.start.y)<8&&m.hit)selectCountry(m.hit);
+ if(!m.moved&&Math.hypot(pos(e).x-m.start.x,pos(e).y-m.start.y)<8){
+   if(m.hit)selectCountry(m.hit);
+   else if(m.sea)clearSelection();
+ }
  try{svg.releasePointerCapture(e.pointerId);}catch(_){}
 }
 svg.addEventListener('pointerup',mouseRelease);
@@ -468,7 +489,7 @@ svg.addEventListener('touchstart',e=>{
  const pts=locations(e);
  if(!pts.length)return;
  if(pts.length===1){
-   if(!touch||touch.mode!=='single')touch={mode:'single',start:pts[0],last:pts[0],hit:getHit(e.target),moved:false};
+   if(!touch||touch.mode!=='single')touch={mode:'single',start:pts[0],last:pts[0],hit:getHit(e.target),sea:isSeaTarget(e.target),moved:false};
  }else{
    touch={mode:'pinch',prev:midpoint(pts[0],pts[1]),moved:true};
  }
@@ -497,7 +518,10 @@ svg.addEventListener('touchend',e=>{
  const n=e.touches.length;
  if(n===0){
    const t=touch;touch=null;svg.classList.remove('dragging');
-   if(t.mode==='single'&&!t.moved&&t.hit)selectCountry(t.hit);
+   if(t.mode==='single'&&!t.moved){
+     if(t.hit)selectCountry(t.hit);
+     else if(t.sea)clearSelection();
+   }
  }else if(n===1){
    // Never turn the remaining finger of a pinch into an accidental country tap.
    touch={mode:'single',start:locations(e)[0],last:locations(e)[0],hit:null,moved:true};
